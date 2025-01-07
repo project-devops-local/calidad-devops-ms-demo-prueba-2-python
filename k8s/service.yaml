@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: csv-microservice
+  namespace: default
+spec:
+  selector:
+    app: csv-microservice
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000

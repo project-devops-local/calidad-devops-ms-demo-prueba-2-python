@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: csv-microservice-config
+  namespace: default
+data:
+  ARTIFACTORY_DOCUMENTS_URL: "https://devsecopsuniversal.online/artifactory/reportes-csv/Documents"
+  SCHEDULE_INTERVAL: "1"

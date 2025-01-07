@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Docker
+*.log
+*.swp
+.dockerignore
+
+# Entornos virtuales
+.env
+.venv
+
+# Credenciales
+.env.local
