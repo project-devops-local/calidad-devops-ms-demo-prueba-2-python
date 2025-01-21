@@ -3,7 +3,8 @@ import io
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import requests
-from flask import Flask, Response
+import pandas as pd
+from flask import Flask, jsonify, make_response
 from apscheduler.schedulers.background import BackgroundScheduler
 from requests.exceptions import RequestException
 import datetime
@@ -36,13 +37,26 @@ logger.addHandler(console_handler)
 # ------------------------------------------------------------------------------
 # CONFIGURACIÓN DE ARTIFACTORY / ENTORNOS
 # ------------------------------------------------------------------------------
-ARTIFACTORY_DOCUMENTS_URL = os.getenv("ARTIFACTORY_DOCUMENTS_URL", "").rstrip("/")
+# URL base (carpeta) donde se encuentran los CSV a descargar
+ARTIFACTORY_DOCUMENTS_URL = os.getenv(
+    "ARTIFACTORY_DOCUMENTS_URL",
+    ""
+).rstrip("/")
+
+# Credenciales (ajusta si tu Artifactory las requiere)
 ART_USER = os.getenv("ART_USER", "")
 ART_PASSWORD = os.getenv("ART_PASSWORD", "")
+
+# Tiempo de espera para las requests (segundos)
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 10))
+
+# Verificación de certificados SSL (poner True en producción con certificado válido)
 VERIFY_SSL = False
+
+# Intervalo en minutos para la tarea de refresco programada
 SCHEDULE_INTERVAL = int(os.getenv("SCHEDULE_INTERVAL", 5))
 
+# Lista de archivos CSV que se descargarán
 FILES_TO_REFRESH = [
     "reporteFortify.csv",
     "reporteGithub.csv"
@@ -58,10 +72,11 @@ app = Flask(__name__)
 # ------------------------------------------------------------------------------
 csv_cache = {}
 
+
 # ------------------------------------------------------------------------------
-# FUNCIÓN PARA DESCARGAR EL CSV
+# FUNCIÓN PARA DESCARGAR Y CONVERTIR UN CSV EN JSON (LISTA DE DICTS)
 # ------------------------------------------------------------------------------
-def descargar_csv(filename):
+def descargar_y_convertir_csv(filename):
     url = f"{ARTIFACTORY_DOCUMENTS_URL}/{filename}"
     logger.info(f"🔗 Descargando CSV desde: {url}")
 
@@ -74,17 +89,21 @@ def descargar_csv(filename):
         )
         response.raise_for_status()
 
-        csv_content = response.text
-        total_lineas = csv_content.count('\n')
-        logger.info(f"✅ Descarga exitosa de {filename}. Líneas leídas: {total_lineas}")
-        return csv_content
+        df = pd.read_csv(io.StringIO(response.text), encoding="utf-8", low_memory=False)
+        data_json = df.to_dict(orient="records")
+        logger.info(f"✅ Descarga exitosa. Filas leídas: {len(df)}")
+        return data_json
 
     except RequestException as re:
         logger.error(f"❌ Error al descargar el archivo CSV {filename}: {re}")
         return None
+    except pd.errors.EmptyDataError:
+        logger.error(f"⚠️ El CSV {filename} está vacío o corrompido.")
+        return None
     except Exception as e:
         logger.exception(f"❌ Error inesperado al procesar el CSV {filename}: {e}")
         return None
+
 
 # ------------------------------------------------------------------------------
 # FUNCIÓN DE REFRESCO DE CACHE (PROGRAMADA)
@@ -95,10 +114,10 @@ def refrescar_cache():
 
     for filename in FILES_TO_REFRESH:
         logger.info(f"🔄 Refrescando archivo: {filename}")
-        csv_content = descargar_csv(filename)
-        if csv_content is not None:
+        data_json = descargar_y_convertir_csv(filename)
+        if data_json is not None:
             csv_cache[filename] = {
-                "content": csv_content,
+                "data": data_json,
                 "last_updated": datetime.datetime.now()
             }
             logger.info(f"✅ Caché actualizada para: {filename}")
@@ -107,67 +126,62 @@ def refrescar_cache():
 
     logger.info("✅ Refresco automático completado.")
 
+
 # ------------------------------------------------------------------------------
-# ENDPOINT PRINCIPAL PARA OBTENER EL CSV
+# ENDPOINT PARA OBTENER DATA DE UN CSV DESDE LA CACHÉ (SIN DESCARGA AL VUELO)
 # ------------------------------------------------------------------------------
 @app.route("/api/v1/data/<path:filename>", methods=["GET"])
 def get_csv_data(filename):
-    """
-    Devuelve el contenido crudo del CSV (text/csv) directamente desde la caché.
-    Si no existe en la caché, se responde con texto plano de error (no JSON).
-    """
-    cache_item = csv_cache.get(filename)
-
-    if not cache_item:
+    if filename in csv_cache:
+        logger.info(f"↩️ Devolviendo datos desde la caché para: {filename}")
+        return jsonify(csv_cache[filename]["data"])
+    else:
         logger.warning(f"⚠️ El archivo {filename} no está en la caché.")
-        return Response(
-            f"Archivo '{filename}' no encontrado en la caché.\n",
-            status=404,
-            mimetype="text/plain"
+        return make_response(
+            jsonify({"error": f"No se encontraron datos para {filename} en la caché."}),
+            404
         )
 
-    logger.info(f"↩️ Devolviendo datos desde la caché para: {filename}")
-    return Response(
-        cache_item["content"],
-        mimetype="text/csv"
-    )
-
 # ------------------------------------------------------------------------------
-# ENDPOINT PARA VER ESTADO DE LA CACHÉ (SI AÚN QUIERES VERLO EN JSON)
+# ENDPOINT PARA VER ESTADO DE LA CACHÉ
 # ------------------------------------------------------------------------------
 @app.route("/api/v1/cache/status", methods=["GET"])
 def cache_status():
-    """
-    Muestra (en JSON) cuándo fue la última actualización de cada archivo
-    y cuántos caracteres tiene. Esto puede ser útil para diagnóstico.
-    """
-    status_info = {}
-    for fname, data in csv_cache.items():
-        lu = data["last_updated"]
-        status_info[fname] = {
-            "last_updated": lu.isoformat() if lu else "N/A",
-            "characters_in_csv": len(data["content"]),
+    status = {
+        filename: {
+            "last_updated": (
+                cache_data["last_updated"].isoformat()
+                if "last_updated" in cache_data else "N/A"
+            ),
+            "entries": len(cache_data.get("data", []))
         }
-    # Si NO quieres JSON en absoluto, puedes devolver CSV o texto plano.
-    # Aquí mantengo JSON solo como diagnóstico.
-    from flask import jsonify
-    return jsonify(status_info)
+        for filename, cache_data in csv_cache.items()
+    }
+    return jsonify(status)
 
 # ------------------------------------------------------------------------------
 # CONFIGURACIÓN DE APSCHEDULER
 # ------------------------------------------------------------------------------
 scheduler = BackgroundScheduler()
+
+# La clave es usar next_run_time=datetime.datetime.now() para que el job corra
+# inmediatamente al iniciar el microservicio y, después, cada SCHEDULE_INTERVAL.
 scheduler.add_job(
     refrescar_cache,
     'interval',
     minutes=SCHEDULE_INTERVAL,
     next_run_time=datetime.datetime.now()
 )
+
 scheduler.start()
 
 # ------------------------------------------------------------------------------
 # MAIN
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando microservicio Flask para exponer CSV en crudo...")
+    logger.info("🚀 Iniciando microservicio Flask con actualización inmediata y automática...")
+    # ¡No necesitamos llamar manualmente a refrescar_cache()!
+    # El job se ejecutará de inmediato por 'next_run_time=datetime.datetime.now()'
+    # y luego respetará el intervalo (SCHEDULE_INTERVAL).
+
     app.run(host="0.0.0.0", port=5000, debug=False)
