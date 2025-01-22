@@ -1,5 +1,6 @@
 import os
 import io
+import math
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import requests
@@ -94,18 +95,25 @@ def descargar_y_convertir_csv(filename):
 
         # Función para limpiar valores celda a celda
         def clean_value(val):
-            # Si es string, quitamos espacios en blanco al inicio y final
+            """
+            - Si el valor es numérico (float) y es NaN, lo convertimos a None (→ null en JSON).
+            - Si es string, lo .strip() y, si queda vacío o es 'null', lo convertimos a None.
+            - En cualquier otro caso, lo regresamos tal cual.
+            """
+            if isinstance(val, float) and math.isnan(val):
+                return None
+
             if isinstance(val, str):
                 val = val.strip()
-                # Si queda vacío, lo convertimos en la cadena "null"
-                if val == "":
-                    return "null"
+                if val == "" or val.lower() == "null":
+                    return None
+
             return val
 
-        # Aplicamos la función a todo el DataFrame
+        # Aplicamos la función de limpieza a todo el DataFrame
         df = df.applymap(clean_value)
 
-        # Convertimos a JSON (lista de diccionarios)
+        # Convertimos a lista de diccionarios (cada fila es un dict)
         data_json = df.to_dict(orient="records")
 
         logger.info(f"✅ Descarga exitosa. Filas leídas: {len(df)}")
@@ -143,7 +151,7 @@ def refrescar_cache():
     logger.info("✅ Refresco automático completado.")
 
 # ------------------------------------------------------------------------------
-# ENDPOINT PARA OBTENER DATA DE UN CSV DESDE LA CACHÉ
+# ENDPOINT PARA OBTENER DATA DE UN CSV DESDE LA CACHÉ (SIN DESCARGA AL VUELO)
 # ------------------------------------------------------------------------------
 @app.route("/api/v1/data/<path:filename>", methods=["GET"])
 def get_csv_data(filename):
@@ -179,13 +187,11 @@ def cache_status():
 # ------------------------------------------------------------------------------
 scheduler = BackgroundScheduler()
 
-# La clave es usar next_run_time=datetime.datetime.now() para que el job corra
-# inmediatamente al iniciar el microservicio y, después, cada SCHEDULE_INTERVAL.
 scheduler.add_job(
     refrescar_cache,
     'interval',
     hours=SCHEDULE_INTERVAL,
-    next_run_time=datetime.datetime.now()
+    next_run_time=datetime.datetime.now()  # Ejecutar ahora e intervalos posteriores
 )
 
 scheduler.start()
@@ -196,7 +202,7 @@ scheduler.start()
 if __name__ == "__main__":
     logger.info("🚀 Iniciando microservicio Flask con actualización inmediata y automática...")
     # No llamamos manualmente a refrescar_cache().
-    # Se ejecutará de inmediato gracias a next_run_time=datetime.datetime.now().
-    # Luego cada SCHEDULE_INTERVAL horas.
+    # Gracias a next_run_time=datetime.datetime.now(), el refresco se dispara inmediatamente.
+    # Después, se repetirá cada 'SCHEDULE_INTERVAL' horas.
 
     app.run(host="0.0.0.0", port=5000, debug=False)
