@@ -53,13 +53,14 @@ REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 10))
 # Verificación de certificados SSL (poner True en producción con certificado válido)
 VERIFY_SSL = False
 
-# Intervalo en minutos para la tarea de refresco programada
-SCHEDULE_INTERVAL = int(os.getenv("SCHEDULE_INTERVAL", 5))
+# Intervalo en horas para la tarea de refresco programada
+SCHEDULE_INTERVAL = int(os.getenv("SCHEDULE_INTERVAL", 8))
 
 # Lista de archivos CSV que se descargarán
 FILES_TO_REFRESH = [
-    "reporteFortify.csv",
-    "reporteGithub.csv"
+    "InventarioPods.csv",
+    "InventarioGithub.csv",
+    "InventarioPrueba.csv"
 ]
 
 # ------------------------------------------------------------------------------
@@ -71,7 +72,6 @@ app = Flask(__name__)
 # CACHE EN MEMORIA
 # ------------------------------------------------------------------------------
 csv_cache = {}
-
 
 # ------------------------------------------------------------------------------
 # FUNCIÓN PARA DESCARGAR Y CONVERTIR UN CSV EN JSON (LISTA DE DICTS)
@@ -89,8 +89,25 @@ def descargar_y_convertir_csv(filename):
         )
         response.raise_for_status()
 
+        # Leemos el CSV en un DataFrame
         df = pd.read_csv(io.StringIO(response.text), encoding="utf-8", low_memory=False)
+
+        # Función para limpiar valores celda a celda
+        def clean_value(val):
+            # Si es string, quitamos espacios en blanco al inicio y final
+            if isinstance(val, str):
+                val = val.strip()
+                # Si queda vacío, lo convertimos en la cadena "null"
+                if val == "":
+                    return "null"
+            return val
+
+        # Aplicamos la función a todo el DataFrame
+        df = df.applymap(clean_value)
+
+        # Convertimos a JSON (lista de diccionarios)
         data_json = df.to_dict(orient="records")
+
         logger.info(f"✅ Descarga exitosa. Filas leídas: {len(df)}")
         return data_json
 
@@ -103,7 +120,6 @@ def descargar_y_convertir_csv(filename):
     except Exception as e:
         logger.exception(f"❌ Error inesperado al procesar el CSV {filename}: {e}")
         return None
-
 
 # ------------------------------------------------------------------------------
 # FUNCIÓN DE REFRESCO DE CACHE (PROGRAMADA)
@@ -126,9 +142,8 @@ def refrescar_cache():
 
     logger.info("✅ Refresco automático completado.")
 
-
 # ------------------------------------------------------------------------------
-# ENDPOINT PARA OBTENER DATA DE UN CSV DESDE LA CACHÉ (SIN DESCARGA AL VUELO)
+# ENDPOINT PARA OBTENER DATA DE UN CSV DESDE LA CACHÉ
 # ------------------------------------------------------------------------------
 @app.route("/api/v1/data/<path:filename>", methods=["GET"])
 def get_csv_data(filename):
@@ -169,7 +184,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(
     refrescar_cache,
     'interval',
-    minutes=SCHEDULE_INTERVAL,
+    hours=SCHEDULE_INTERVAL,
     next_run_time=datetime.datetime.now()
 )
 
@@ -180,8 +195,8 @@ scheduler.start()
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
     logger.info("🚀 Iniciando microservicio Flask con actualización inmediata y automática...")
-    # ¡No necesitamos llamar manualmente a refrescar_cache()!
-    # El job se ejecutará de inmediato por 'next_run_time=datetime.datetime.now()'
-    # y luego respetará el intervalo (SCHEDULE_INTERVAL).
+    # No llamamos manualmente a refrescar_cache().
+    # Se ejecutará de inmediato gracias a next_run_time=datetime.datetime.now().
+    # Luego cada SCHEDULE_INTERVAL horas.
 
     app.run(host="0.0.0.0", port=5000, debug=False)
