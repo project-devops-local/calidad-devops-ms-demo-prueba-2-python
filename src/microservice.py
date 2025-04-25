@@ -13,7 +13,7 @@ import datetime
 # ------------------------------------------------------------------------------
 # CONFIGURACIÓN DE LOGS CON TimedRotatingFileHandler
 # ------------------------------------------------------------------------------
-log_file = "microservice.log"
+log_file = "<NAME_LOG_FILE>.log"  # Cambia esto por la ruta y nombre de tu archivo de log
 
 log_handler = TimedRotatingFileHandler(
     log_file,

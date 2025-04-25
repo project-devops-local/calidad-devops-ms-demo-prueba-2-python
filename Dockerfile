@@ -1,5 +1,5 @@
 # 1) Imagen base
-FROM python:3.10-slim
+FROM <IMAGE_DOCKER>
 
 # 2) Directorio de trabajo
 WORKDIR /app

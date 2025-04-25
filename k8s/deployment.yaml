@@ -1,30 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: csv-microservice
+  name: <NAME_SERVICE>
   namespace: default
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: csv-microservice
+      app: <NAME_SERVICE>
   template:
     metadata:
       labels:
-        app: csv-microservice
+        app: <NAME_SERVICE>
     spec:
       containers:
-        - name: csv-microservice
+        - name: <NAME_SERVICE>
           image: maikol555/microservicio:1.0
           ports:
             - containerPort: 5000
           resources:
             requests:
-              cpu: "200m"
-              memory: "200Mi"
+              cpu: <CPU_REQUEST>
+              memory: <MEMORY_REQUEST>
             limits:
-              cpu: "500m"
-              memory: "500Mi"
+              cpu: <CPU_LIMIT>
+              memory: <MEMORY_LIMIT>
           env:
             - name:  ART_USER
               valueFrom:
@@ -34,9 +34,9 @@ spec:
             - name:  ART_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name:  credentials-micro
+                  name:  <CREDENTIALS_SECRET>
                   key:  password
           envFrom:
             - configMapRef:
-                name: csv-microservice-config
+                name: <NAME_SERVICE>-config
          
