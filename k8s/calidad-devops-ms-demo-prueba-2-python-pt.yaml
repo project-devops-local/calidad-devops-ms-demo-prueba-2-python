@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <NAME_SERVICE>
+  namespace: default
+spec:
+  replicas: <REPLICAS>
+  selector:
+    matchLabels:
+      app: <NAME_SERVICE>
+  template:
+    metadata:
+      labels:
+        app: <NAME_SERVICE>
+    spec:
+      containers:
+        - name: <NAME_SERVICE>
+          image: maikol555/microservicio:1.0
+          ports:
+            - containerPort: 5000
+          resources:
+            requests:
+              cpu: <CPU_REQUEST>
+              memory: <MEMORY_REQUEST>
+            limits:
+              cpu: <CPU_LIMIT>
+              memory: <MEMORY_LIMIT>
+          env:
+            - name:  ART_USER
+              valueFrom:
+                secretKeyRef:
+                  name:  credentials-micro
+                  key:  username
+            - name:  ART_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name:  <CREDENTIALS_SECRET>
+                  key:  password
+          envFrom:
+            - configMapRef:
+                name: <NAME_SERVICE>-config
+         
