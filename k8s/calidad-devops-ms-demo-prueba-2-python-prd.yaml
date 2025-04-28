@@ -4,7 +4,7 @@ metadata:
   name: <NAME_SERVICE>
   namespace: default
 spec:
-  replicas: 1
+  replicas: <REPLICAS>
   selector:
     matchLabels:
       app: <NAME_SERVICE>
